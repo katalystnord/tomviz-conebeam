@@ -85,6 +85,9 @@ robust to dead pixels.</li>
 Parker weights, detector offsets and either rotation direction, or for any
 geometry given as per-projection source and detector vectors (the ASTRA
 <code>cone_vec</code> layout).</li>
+<li><strong>Remove Ring Artifacts</strong>: removes the rings that
+slightly mismatched detector pixels cause, before reconstruction, for cone
+and parallel beams.</li>
 <li><strong>Cone-Beam SIRT</strong>: iterative reconstruction for the same
 geometries. It gives much better results than FDK from few or noisy
 projections, and can show the volume as it converges.</li>
@@ -123,8 +126,11 @@ and otherwise run their original code unchanged.</p>
 </table>
 </div>
 <p>The new WBP matches the original to float precision inside the field of
-view. These are software-GPU numbers; a real GPU should be much faster, but
-that has not been measured yet.</p>
+view. These are software-GPU numbers. First real-GPU result, on an AMD
+Radeon RX 9070: cone-beam FDK of 600 walnut projections into 250&sup3;
+voxels takes 5.2 s, against 18.4 s on lavapipe, with the results agreeing
+to 1.6&times;10<sup>&minus;5</sup> of the peak. That first run on real
+hardware also found and fixed a bug that only one GPU driver showed.</p>
 
 <h2>Results on real data</h2>
 
@@ -153,6 +159,37 @@ voxels:</p>
 </figure>
 </div>
 
+<h3>Ring artifacts</h3>
+<p>To test ring removal on real data, we added typical detector defects to
+the walnut's raw projections: small gain errors on 3% of the pixels,
+pixels with a slightly nonlinear response, clusters of neighbouring
+pixels, and a few dead pixels.</p>
+<figure>
+<img src="images/walnut-rings.png" alt="Three walnut slices: the clean reconstruction, the same with swirling ring artifacts from injected detector defects, and the corrected one, which looks like the clean one.">
+<figcaption>Left: reconstruction of the clean data. Middle: with the
+injected detector defects. Right: after Remove Ring Artifacts. 2.4 s for
+600 projections of 486&times;384 pixels on 8 CPU threads.</figcaption>
+</figure>
+<div class="wrap">
+<table>
+<thead><tr><th>Method</th><th>Ring error left</th><th>Change to clean data</th></tr></thead>
+<tbody>
+<tr><td>No correction</td><td class="num">0.218</td><td class="num">0</td></tr>
+<tr><td><strong>Tomviz (new)</strong></td><td class="num"><strong>0.047</strong></td><td class="num"><strong>0.020</strong></td></tr>
+<tr><td>TomoPy, filtering</td><td class="num">0.074</td><td class="num">0.020</td></tr>
+<tr><td>TomoPy, sorting</td><td class="num">0.090</td><td class="num">0.041</td></tr>
+<tr><td>TomoPy, remove_all_stripe</td><td class="num">0.261</td><td class="num">0.261</td></tr>
+</tbody>
+</table>
+</div>
+<p>Errors are RMS differences from the clean reconstruction, in units of the
+walnut's density spread. The method is the filtering technique of Vo,
+Atwood and Drakopoulos (2018) on line integrals, plus repair of dead
+pixels. Their large-stripe detection was left out on purpose: on this data
+it flagged 7 to 20% of the pixels of clean data and left more error than
+no correction. The benchmark is <code>dev/ring_bench.py</code> in the
+branch.</p>
+
 <h3>Electron tomography: the bundled nanoparticle</h3>
 <figure>
 <img src="images/nanoparticle-wbp-sirt.png" alt="Star-shaped nanoparticle reconstructed three ways; the two WBP results look identical, SIRT is cleaner.">
@@ -167,10 +204,10 @@ axis; bottom: along it.</figcaption>
 <div class="wrap">
 <table>
 <tbody>
-<tr><td><span class="status done">done</span></td><td>Flat/dark correction, &minus;log, Cone-Beam FDK, Cone-Beam SIRT, shared projectors with WebGPU backend, faster WBP and Generate Tilt Series. 69 automated tests, including orientation checks against an analytic phantom and GPU-against-CPU agreement.</td></tr>
+<tr><td><span class="status done">done</span></td><td>Flat/dark correction, &minus;log, Cone-Beam FDK, Cone-Beam SIRT, shared projectors with WebGPU backend, faster WBP and Generate Tilt Series. Automated tests, including orientation checks against an analytic phantom and GPU-against-CPU agreement.</td></tr>
 <tr><td><span class="status done">done</span></td><td>Linux <code>.deb</code> and AppImage packages for Tomviz, tested on Debian, Ubuntu and Rocky Linux, and on an AMD Radeon RX 9070 (<a href="https://github.com/sandbranch/tomviz-packaging/tree/linux-deb-appimage">branch</a>).</td></tr>
-<tr><td><span class="status todo">in progress</span></td><td>Ring artifact removal.</td></tr>
-<tr><td><span class="status todo">not yet</span></td><td>Reconstruction timings on a real GPU; the new operators checked in the built application; continuous integration with lavapipe.</td></tr>
+<tr><td><span class="status done">done</span></td><td>Ring artifact removal, chosen by benchmark on real data. All 76 tests pass on lavapipe and on an AMD Radeon RX 9070.</td></tr>
+<tr><td><span class="status todo">not yet</span></td><td>Systematic timings on real GPUs from several vendors; the new operators checked in the built application; continuous integration with lavapipe.</td></tr>
 <tr><td><span class="status todo">later</span></td><td>Readers for scanner projection formats (for example Zeiss TXRM, Nikon XTEK), helical and other non-circular scans in the GUI, TV regularisation.</td></tr>
 </tbody>
 </table>
