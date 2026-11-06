@@ -12,3 +12,6 @@ of our Tomviz fork, going upstream as a series of pull requests.
 
 Walnut images are our reconstructions of the CWI walnut data
 ([doi:10.5281/zenodo.2686726](https://doi.org/10.5281/zenodo.2686726), CC BY 4.0).
+
+BSD-3-Clause, the same licence as Tomviz (see `LICENSE`). The walnut images
+are derived from CC BY 4.0 data and keep the attribution above.
