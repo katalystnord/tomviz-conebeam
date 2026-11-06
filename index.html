@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cone-beam CT for Tomviz</title>
+<meta name="description" content="Adding cone-beam X-ray CT reconstruction to Tomviz: FDK, SIRT, X-ray preprocessing and GPU projectors that run on any GPU, or none.">
+<style>
+:root {
+  --bg: #fbfaf8; --fg: #1d1f21; --muted: #5b6168; --line: #e2e0dc;
+  --card: #ffffff; --accent: #0b6e8a; --ok: #2d7a3e; --todo: #9a6a00;
+  --code: #f1efeb;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15171a; --fg: #e6e4e0; --muted: #9aa0a6; --line: #2c3035;
+    --card: #1c1f23; --accent: #5fb8d3; --ok: #6cc583; --todo: #e0b14a;
+    --code: #23272c;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+main { max-width: 860px; margin: 0 auto; padding: 48px 16px 80px; }
+h1 { font-size: 2.2rem; line-height: 1.2; margin: 0 0 .4em; }
+h2 { font-size: 1.4rem; margin: 2.4em 0 .6em; padding-top: .6em; border-top: 1px solid var(--line); }
+h3 { font-size: 1.1rem; margin: 1.6em 0 .4em; }
+p, li { color: var(--fg); }
+.lede { font-size: 1.15rem; color: var(--muted); }
+a { color: var(--accent); }
+code { background: var(--code); padding: 1px 5px; border-radius: 4px; font-size: .9em; }
+figure { margin: 1.4em 0; }
+figure img { width: 100%; height: auto; display: block; border-radius: 6px; background: #000; }
+figcaption { font-size: .9rem; color: var(--muted); margin-top: .5em; }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 600px) { .pair { grid-template-columns: 1fr; } }
+table { width: 100%; border-collapse: collapse; font-size: .95rem; margin: 1em 0; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wrap { overflow-x: auto; }
+.status { display: inline-block; font-size: .8rem; font-weight: 600; padding: 1px 8px; border-radius: 10px; border: 1px solid currentColor; }
+.done { color: var(--ok); }
+.todo { color: var(--todo); }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px 18px; margin: 1em 0; }
+footer { margin-top: 4em; font-size: .85rem; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Cone-beam CT for Tomviz</h1>
+<p class="lede">Tomviz is an open source tool for reconstructing and visualising 3D
+tomography data. Today it reconstructs parallel-beam data: electron tomography
+and synchrotron CT. This project adds what lab and industrial X-ray CT scanners
+need, starting with cone-beam reconstruction, so that the same tool covers
+them too.</p>
+
+<p>The work is being done in the open, as a series of pull requests to
+<a href="https://github.com/OpenChemistry/tomviz">OpenChemistry/tomviz</a>.
+This page explains what is being added, why, and how far it has got. Code:
+the <a href="https://github.com/sandbranch/tomviz/tree/conebeam"><code>conebeam</code> branch</a>
+of our Tomviz fork.</p>
+
+<h2>Why</h2>
+<p>Most lab and industrial CT scanners have a point X-ray source, so the rays
+fan out in a cone from the source to a flat detector. Everything in Tomviz
+assumes parallel rays. Reconstructing cone-beam data as if it were parallel is
+only approximately right in the central slice and gets worse away from it.</p>
+<p>Before reconstruction, raw X-ray projections also need flat-field and
+dark-field correction and a logarithm, which Tomviz does not have either.
+Without these steps, scanner data cannot be reconstructed in Tomviz at all.</p>
+
+<h2>What is being added</h2>
+
+<h3>New operators, in the Tomography menu</h3>
+<ul>
+<li><strong>Flat/Dark Field Correction</strong> and <strong>Intensity to
+Line Integrals</strong>: the standard first steps for raw X-ray projections,
+robust to dead pixels.</li>
+<li><strong>Cone-Beam FDK</strong>: the standard analytic reconstruction
+(Feldkamp, Davis and Kress), for circular scans, including short scans with
+Parker weights, detector offsets and either rotation direction, or for any
+geometry given as per-projection source and detector vectors (the ASTRA
+<code>cone_vec</code> layout).</li>
+<li><strong>Cone-Beam SIRT</strong>: iterative reconstruction for the same
+geometries. It gives much better results than FDK from few or noisy
+projections, and can show the volume as it converges.</li>
+</ul>
+
+<h3>Shared projectors that run on any GPU, or none</h3>
+<p>Underneath is a new package, <code>tomviz.projectors</code>: geometry for
+cone and parallel beams, a backprojector and a forward projector, written once
+as a WebGPU compute shader and once as plain NumPy. The shader runs through the optional
+<code>wgpu</code> package, which targets Vulkan, Metal and Direct3D 12, so it
+is not tied to one GPU vendor; so far it has been tested on Vulkan. Without a
+GPU it runs on a software driver (tested: Mesa lavapipe on Linux; WARP on
+Windows should work the same way but is untested), and only then falls back
+to NumPy.</p>
+<p>That middle step matters more than expected. On 8 CPU threads and no GPU,
+the shader on lavapipe was 13 to 17 times faster than vectorised NumPy for
+backprojection and forward projection. NumPy writes a full-size temporary
+array for every operation, while the shader runs fused per element, compiled
+by LLVM to SIMD on every core.</p>
+
+<h3>Faster parallel-beam tools as a side effect</h3>
+<p>Because the projectors handle parallel beams too, existing electron
+tomography tools can use them. Weighted Back Projection and Generate Tilt
+Series now run on the shared projectors when a WebGPU adapter is available,
+and otherwise run their original code unchanged.</p>
+
+<div class="wrap">
+<table>
+<thead><tr><th>Task (8 CPU threads, no GPU, lavapipe)</th><th>Before</th><th>Now</th></tr></thead>
+<tbody>
+<tr><td>Weighted Back Projection, 512&sup3;, 71 tilts</td><td class="num">51 s</td><td class="num">12.2 s</td></tr>
+<tr><td>Weighted Back Projection, bundled nanoparticle data</td><td class="num">6.45 s</td><td class="num">1.77 s</td></tr>
+<tr><td>Generate Tilt Series, 256&sup3;, 71 tilts</td><td class="num">58.5 s</td><td class="num">3.5 s</td></tr>
+<tr><td>SIRT, 60 iterations, 32&times;40&times;40 (vs NumPy)</td><td class="num">44 s</td><td class="num">1.4 s</td></tr>
+</tbody>
+</table>
+</div>
+<p>The new WBP matches the original to float precision inside the field of
+view. These are software-GPU numbers; a real GPU should be much faster, but
+that has not been measured yet.</p>
+
+<h2>Results on real data</h2>
+
+<h3>Lab cone-beam CT: a walnut</h3>
+<figure>
+<img src="images/walnut-fdk-full.png" alt="Three orthogonal slices of a walnut. Top row: the dataset authors' reconstruction. Bottom row: the new Tomviz FDK. They look the same.">
+<figcaption>Walnut 1 of the CWI cone-beam collection, all 1200 projections,
+reconstructed into 501&sup3; voxels. Top: the dataset authors' own reference
+reconstruction. Bottom: the new Cone-Beam FDK. Correlation 0.962, mean
+density within 2.1%. 255 s on lavapipe (software GPU, 8 threads).</figcaption>
+</figure>
+
+<p>With only 60 of the 1200 projections, FDK breaks up into streaks while SIRT
+still recovers the structure. In both images the top row is the full-data
+reference and the bottom row the reconstruction from 60 views, at 125&sup3;
+voxels:</p>
+<div class="pair">
+<figure>
+<img src="images/walnut-sparse-fdk.png" alt="Walnut slices from 60 projections with FDK: streaky and noisy.">
+<figcaption>FDK from 60 views: correlation 0.872 with the reference.</figcaption>
+</figure>
+<figure>
+<img src="images/walnut-sparse-sirt.png" alt="Walnut slices from 60 projections with SIRT: much cleaner.">
+<figcaption>SIRT, 100 iterations, from 60 views: correlation 0.952,
+59 s.</figcaption>
+</figure>
+</div>
+
+<h3>Electron tomography: the bundled nanoparticle</h3>
+<figure>
+<img src="images/nanoparticle-wbp-sirt.png" alt="Star-shaped nanoparticle reconstructed three ways; the two WBP results look identical, SIRT is cleaner.">
+<figcaption>The star nanoparticle tilt series that ships with Tomviz. Left:
+the original Weighted Back Projection. Middle: the same WBP on the shared
+projectors, 3.6 times faster and matching it inside the field of view.
+Right: parallel-beam SIRT on the same projectors. Top: slice across the tilt
+axis; bottom: along it.</figcaption>
+</figure>
+
+<h2>Status</h2>
+<div class="wrap">
+<table>
+<tbody>
+<tr><td><span class="status done">done</span></td><td>Flat/dark correction, &minus;log, Cone-Beam FDK, Cone-Beam SIRT, shared projectors with WebGPU backend, faster WBP and Generate Tilt Series. 69 automated tests, including orientation checks against an analytic phantom and GPU-against-CPU agreement.</td></tr>
+<tr><td><span class="status done">done</span></td><td>Linux <code>.deb</code> and AppImage packages for Tomviz, tested on Debian, Ubuntu and Rocky Linux, and on an AMD Radeon RX 9070 (<a href="https://github.com/sandbranch/tomviz-packaging/tree/linux-deb-appimage">branch</a>).</td></tr>
+<tr><td><span class="status todo">in progress</span></td><td>Ring artifact removal.</td></tr>
+<tr><td><span class="status todo">not yet</span></td><td>Reconstruction timings on a real GPU; the new operators checked in the built application; continuous integration with lavapipe.</td></tr>
+<tr><td><span class="status todo">later</span></td><td>Readers for scanner projection formats (for example Zeiss TXRM, Nikon XTEK), helical and other non-circular scans in the GUI, TV regularisation.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>How it will go upstream</h2>
+<p>As small pull requests, each useful on its own and each with its own
+tests:</p>
+<ol>
+<li>Flat/dark field correction and the &minus;log transform.</li>
+<li>The shared projectors (CPU) and Cone-Beam FDK.</li>
+<li>The WebGPU backend. This adds an optional dependency
+(<code>wgpu</code>), so we will open an issue to discuss it first.</li>
+<li>Weighted Back Projection and Generate Tilt Series on the shared projectors.</li>
+<li>SIRT for cone and parallel beams.</li>
+<li>Ring artifact removal.</li>
+</ol>
+<p>The packaging work goes to
+<a href="https://github.com/OpenChemistry/tomviz-packaging">OpenChemistry/tomviz-packaging</a>
+separately.</p>
+
+<div class="card">
+<strong>Design rules we hold to.</strong> Nothing tied to one machine, vendor or
+operating system. Every GPU path has a plain CPU reference it is tested
+against, and the GPU code is tested without GPU hardware, on a software
+driver. When no GPU adapter exists, existing operators run their original
+code unchanged.
+</div>
+
+<footer>
+<p>By <a href="https://github.com/katalystnord">Katalyst Nord</a>.
+Walnut data: H. Der Sarkissian, F. Lucka, M. van Eijnatten, G. Colacicco,
+S. B. Coban and K. J. Batenburg, <em>Cone-Beam X-Ray CT Data Collection
+Designed for Machine Learning</em>,
+<a href="https://doi.org/10.5281/zenodo.2686726">doi:10.5281/zenodo.2686726</a>,
+CC BY 4.0; the images here are our reconstructions of it. Nanoparticle tilt
+series: Tomviz sample data,
+<a href="https://doi.org/10.1021/nl103400a">doi:10.1021/nl103400a</a>.</p>
+</footer>
+
+</main>
+</body>
+</html>
