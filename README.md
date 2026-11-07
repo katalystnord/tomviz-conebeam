@@ -7,7 +7,7 @@ WebGPU, or on a software GPU driver without one.
 
 Page: https://katalystnord.github.io/tomviz-conebeam/
 
-Code: the [`conebeam` branch](https://github.com/sandbranch/tomviz/tree/conebeam)
+Code: the [`conebeam` branch](https://github.com/katalystnord/tomviz/tree/conebeam)
 of our Tomviz fork, going upstream as a series of pull requests.
 
 Walnut images are our reconstructions of the CWI walnut data
