@@ -58,8 +58,8 @@ and synchrotron CT. This project adds what lab and industrial X-ray CT scanners
 need, starting with cone-beam reconstruction, so that the same tool covers
 them too.</p>
 
-<p>The work is being done in the open, as a series of pull requests to
-<a href="https://github.com/OpenChemistry/tomviz">OpenChemistry/tomviz</a>.
+<p>The work is being done in the open, and we would like to offer it to
+the Tomviz maintainers as a series of small pull requests.
 This page explains what is being added, why, and how far it has got. Code:
 the <a href="https://github.com/katalystnord/tomviz/tree/conebeam"><code>conebeam</code> branch</a>
 of our Tomviz fork.</p>
@@ -111,8 +111,9 @@ by LLVM to SIMD on every core.</p>
 <h3>Faster parallel-beam tools as a side effect</h3>
 <p>Because the projectors handle parallel beams too, existing electron
 tomography tools can use them. Weighted Back Projection and Generate Tilt
-Series now run on the shared projectors when a WebGPU adapter is available,
-and otherwise run their original code unchanged.</p>
+Series can run on the shared projectors when a WebGPU adapter is available.
+In what we offer upstream this will be an opt-in setting: by default they
+keep running their original code.</p>
 
 <div class="wrap">
 <table>
@@ -230,7 +231,7 @@ tests:</p>
 <li>The shared projectors (CPU) and Cone-Beam FDK.</li>
 <li>The WebGPU backend. This adds an optional dependency
 (<code>wgpu</code>), so we will open an issue to discuss it first.</li>
-<li>Weighted Back Projection and Generate Tilt Series on the shared projectors.</li>
+<li>Weighted Back Projection and Generate Tilt Series on the shared projectors, as an opt-in.</li>
 <li>SIRT for cone and parallel beams.</li>
 <li>Ring artifact removal.</li>
 </ol>
@@ -242,8 +243,8 @@ separately.</p>
 <strong>Design rules we hold to.</strong> Nothing tied to one machine, vendor or
 operating system. Every GPU path has a plain CPU reference it is tested
 against, and the GPU code is tested without GPU hardware, on a software
-driver. When no GPU adapter exists, existing operators run their original
-code unchanged.
+driver. Existing operators keep their original code by default; the GPU
+path for them is opt-in.
 </div>
 
 <footer>
